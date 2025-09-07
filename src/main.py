@@ -113,7 +113,7 @@ def migrate_config(from_: version.Version, to: version.Version):
     if from_.major == to.major:
         return
 
-    if from_.major == 1 and to.major == 2 or to.major >= 4:
+    if from_.major == 1 and to.major == 2 or to.major >= 5:
         raise NotImplementedError()
 
     return
