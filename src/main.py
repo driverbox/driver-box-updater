@@ -4,6 +4,7 @@ import os
 import random
 import shutil
 import string
+import subprocess
 import tempfile
 import time
 import zipfile
@@ -12,8 +13,6 @@ from pathlib import Path
 import requests
 import tqdm
 from packaging import version
-
-BACKUP = Path('.', '.backup')
 
 
 @contextlib.contextmanager
@@ -34,23 +33,48 @@ def temporary_directory(dir: str = None, delete: bool = True):
             shutil.rmtree(dir_temp, True)
 
 
-def backup():
-    if BACKUP.exists():
-        shutil.rmtree(BACKUP)
-    os.mkdir(BACKUP)
+class Updater:
 
-    for filename in ('driver-box.exe', 'bin', 'conf'):
-        if not (path := Path(filename)).exists():
-            continue
+    dir_backup = Path('.backup')
 
-        shutil.move(path, BACKUP.joinpath(filename))
+    def __init__(self, version_from: str, version_to: str, binary_type: str, webview: bool):
+        if self.dir_backup.exists():
+            shutil.rmtree(self.dir_backup)
+        self.dir_backup.mkdir()
 
+        self.version_from = version.parse(version_from)
+        self.version_to = version.parse(version_to)
+        self.binary_type = binary_type
+        self.webview = webview
+        if self.version_from.major > self.version_to.major:
+            raise ValueError('Downgrade is not supported!')
 
-def cleanup(restore: bool):
-    if not restore:
-        print('Removing backups...')
-    else:
-        print('Restoring states...')
+    def __enter__(self):
+        self.backup()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.restore()
+        else:
+            self.cleanup()
+        return False
+
+    def backup(self):
+        print('▶ Creating backup...')
+
+        if self.dir_backup.exists():
+            shutil.rmtree(self.dir_backup)
+        self.dir_backup.mkdir()
+
+        for filename in ('driver-box.exe', 'bin', 'conf'):
+            if not (path := Path(filename)).exists():
+                continue
+            shutil.move(path, self.dir_backup.joinpath(filename))
+
+    def restore(self):
+        print('▶ Restoring from backup...')
+
         for filename in ('driver-box.exe', 'bin', 'conf'):
             if (newfile := Path(filename)).exists():
                 if newfile.is_dir():
@@ -58,65 +82,95 @@ def cleanup(restore: bool):
                 else:
                     newfile.unlink()
 
-            if not BACKUP.joinpath(filename).exists():
+            if not self.dir_backup.joinpath(filename).exists():
                 continue
+            shutil.move(self.dir_backup.joinpath(filename), newfile)
 
-            shutil.move(BACKUP.joinpath(filename), newfile)
+        shutil.rmtree(self.dir_backup, ignore_errors=True)
 
-    shutil.rmtree(BACKUP, True)
+    def cleanup(self):
+        print('▶ Cleaning up backup...')
+        shutil.rmtree(self.dir_backup, ignore_errors=True)
 
+    def replace_executable(self):
+        print('▶ Downloading updates...')
 
-def replace_executable(version: str, binary_type: str, webview: bool):
-    filename = f'driver-box.{binary_type}-wv2.zip' if webview else f'driver-box.{binary_type}.zip'
-    resp = requests.get('https://github.com/markmybytes/driver-box/releases/download/'
-                        f'v{version}/{filename}',
-                        stream=True)
+        filename = f'driver-box.{self.binary_type}-wv2.zip' if self.webview else f'driver-box.{self.binary_type}.zip'
+        url = f'https://github.com/markmybytes/driver-box/releases/download/v{self.version_to}/{filename}'
+        resp = requests.get(url, stream=True)
 
-    if resp.headers.get('content-type') not in ('application/zip', 'application/octet-stream'):
-        raise ValueError('invalid version or binary type')
+        if resp.headers.get('content-type') not in ('application/zip', 'application/octet-stream'):
+            raise ValueError('Invalid version or binary type')
 
-    with temporary_directory(dir=os.getcwd()) as tmpdir:
-        tmpdir = Path(tmpdir)
-        fpath = tmpdir.joinpath(filename)
+        with temporary_directory(dir=os.getcwd()) as tmpdir:
+            fpath = tmpdir.joinpath(filename)
 
-        print(f'Downloading: {filename}')
-        with (tqdm.tqdm(total=int(resp.headers['Content-Length']), unit="B", unit_scale=True) as progress,
-                open(fpath, 'wb') as f):
-            for chunk in resp.iter_content(1024):
-                f.write(chunk)
-                progress.update(len(chunk))
-                progress.display()
+            print(f'  ↳ Downloading: {filename}')
+            with (tqdm.tqdm(total=int(resp.headers['Content-Length']), unit='B', unit_scale=True) as progress,
+                  open(fpath, 'wb') as f):
+                for chunk in resp.iter_content(1024):
+                    f.write(chunk)
+                    progress.update(len(chunk))
+                    progress.display()
 
-        print(f'\nUnpacking...')
-        with zipfile.ZipFile(fpath, 'r') as z:
-            for archive in tqdm.tqdm(z.filelist, unit='file'):
-                z.extract(archive.filename, str(tmpdir))
+            print('  ↳ Unpacking...')
+            with zipfile.ZipFile(fpath, 'r') as z:
+                for archive in tqdm.tqdm(z.filelist, unit='file'):
+                    z.extract(archive.filename, str(tmpdir))
 
-        print('Updating...')
-        paths = ('driver-box.exe', 'bin') if webview else ('driver-box.exe',)
-        for path in map(Path, paths):
-            if path.exists():
-                if path.is_dir():
-                    shutil.rmtree(path, True)
-                else:
-                    path.unlink()
+            print('  ↳ Updating files...')
+            paths = (('driver-box.exe', 'bin')
+                     if self.webview else ('driver-box.exe',))
+            for path in map(Path, paths):
+                if path.exists():
+                    if path.is_dir():
+                        shutil.rmtree(path, True)
+                    else:
+                        path.unlink()
+                time.sleep(1)  # add wait time to avoid WinError5
+                if tmpdir.joinpath(path).exists():
+                    shutil.move(tmpdir.joinpath(path), Path(path))
 
-            time.sleep(1)  # add wait time to avoid WinError5
+    def migrate_config(self):
+        if self.version_from.major == self.version_to.major:
+            return
+        if self.version_from.major == 1 and (self.version_to.major == 2 or self.version_to.major >= 5):
+            raise NotImplementedError(
+                f'Auto update from v{self.version_from.major} to v{self.version_to.major} is not supported yet.')
 
-            if tmpdir.joinpath(path).exists():
-                shutil.move(tmpdir.joinpath(path), Path(path))
+        print('▶ Migrating configuration...')
+        shutil.copytree(self.dir_backup / 'conf', Path('conf'))
 
+    def update(self) -> None:
+        self.print_summary()
+        self.replace_executable()
+        self.migrate_config()
 
-def migrate_config(from_: version.Version, to: version.Version):
-    if from_.major == to.major:
-        return
-    if from_.major == 1 and to.major == 2 or to.major >= 5:
-        raise NotImplementedError(f'Auto update from v{from_.major} to v{to.major} is not supported yet.')
-    
-    shutil.copytree(BACKUP.joinpath('conf'), Path('conf'))
+    def print_summary(self):
+        print('+', '-'*26, '+')
+        print('| {:13s}{:^13s} |'.format(
+            'Update From', str(self.version_from)))
+        print('| {:13s}{:^13s} |'.format('Update To', str(self.version_to)))
+        print('| {:13s}{:^13s} |'.format('Binary', self.binary_type))
+        print('| {:13s}{:^13s} |'.format(
+            'WebView2', 'Yes' if self.webview else 'No'))
+        print('+', '-'*26, '+', end='\n\n')
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Driver-Box Updater')
+    parser.add_argument('-d', '--app-directory', type=str,
+                        help='Root directory of driver-box')
+    parser.add_argument('-s', '--version-from', type=str,
+                        required=True, help='Update from which version')
+    parser.add_argument('-t', '--version-to', type=str,
+                        required=True, help='Update to which version')
+    parser.add_argument('-b', '--binary-type', type=str,
+                        required=True, help='Binary target')
+    parser.add_argument('-w', '--webview', action='store_true',
+                        help='Download built-in WebView2 version')
+    args = parser.parse_args()
+
     print(r'''
      _      _                     _                                 _       _            
   __| |_ __(_)_   _____ _ __     | |__   _____  __  _   _ _ __   __| | __ _| |_ ___ _ __ 
@@ -126,48 +180,16 @@ if __name__ == '__main__':
                                                          |_|                             
 ''')
 
-    argparser = argparse.ArgumentParser(description='')
-    argparser.add_argument('-d', '--app-directory', type=str,
-                           help='Root directory of driver-box')
-    argparser.add_argument('-s', '--version-from', type=str,
-                           required=True, help='Update from which verion')
-    argparser.add_argument('-t', '--version-to', type=str,
-                           required=True, help='Update to which version')
-    argparser.add_argument('-b', '--binary-type', type=str,
-                           required=True, help='Binary target')
-    argparser.add_argument('-w', '--webview', action='store_true',
-                           help='Download built-in WebView2 verion')
-
-    args = argparser.parse_args()
     if args.app_directory:
         os.chdir(args.app_directory)
 
-    version_from = version.parse(args.version_from)
-    version_to = version.parse(args.version_to)
-
-    if version_from.major > version_to.major:
-        print('Downgrade is not supported!')
-        input('Press any key to exit...')
-        exit()
-
     try:
-        print('+', '-'*26, '+')
-        print('| {:13s}{:^13s} |'.format('Update From', str(version_from)))
-        print('| {:13s}{:^13s} |'.format('Update To', str(version_to)))
-        print('| {:13s}{:^13s} |'.format('Binary', args.binary_type))
-        print('| {:13s}{:^13s} |'.format(
-            'WebView2', 'Yes' if args.webview else 'No'))
-        print('+', '-'*26, '+', end='\n\n')
+        with Updater(args.version_from, args.version_to, args.binary_type, args.webview) as updater:
+            updater.update()
 
-        backup()
-
-        replace_executable(str(version_to), args.binary_type, args.webview)
-
-        migrate_config(version_from, version_to)
+        print('✔ Update successful.')
+        if input('Open the app? [Y]/N: ').lower() in ('y', ''):
+            subprocess.Popen('driver-box.exe')
     except Exception as e:
-        print(f'Error occures: {e}')
-        cleanup(True)
-    else:
-        cleanup(False)
-
-    input('Finished. Press any key to continue...')
+        print(f'✘ Update failed: {e}')
+        input('Press any key to exit...')
