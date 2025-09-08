@@ -114,7 +114,7 @@ def migrate_config(from_: version.Version, to: version.Version):
         return
 
     if from_.major == 1 and to.major == 2 or to.major >= 5:
-        raise NotImplementedError()
+        raise NotImplementedError(f'Auto update from v{from_.major} to v{to.major} is not supported yet.')
 
     return
 
