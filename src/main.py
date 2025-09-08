@@ -108,15 +108,12 @@ def replace_executable(version: str, binary_type: str, webview: bool):
 
 
 def migrate_config(from_: version.Version, to: version.Version):
-    shutil.move(BACKUP.joinpath('conf'), Path('conf'))
-
     if from_.major == to.major:
         return
-
     if from_.major == 1 and to.major == 2 or to.major >= 5:
         raise NotImplementedError(f'Auto update from v{from_.major} to v{to.major} is not supported yet.')
-
-    return
+    
+    shutil.copytree(BACKUP.joinpath('conf'), Path('conf'))
 
 
 if __name__ == '__main__':
