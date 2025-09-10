@@ -67,7 +67,7 @@ class Updater:
             shutil.rmtree(self.dir_backup)
         self.dir_backup.mkdir()
 
-        for filename in ('driver-box.exe', 'bin', 'conf'):
+        for filename in ('install-it.exe', 'bin', 'conf'):
             if not (path := Path(filename)).exists():
                 continue
             shutil.move(path, self.dir_backup.joinpath(filename))
@@ -75,7 +75,7 @@ class Updater:
     def restore(self):
         print('▶ Restoring from backup...')
 
-        for filename in ('driver-box.exe', 'bin', 'conf'):
+        for filename in ('install-it.exe', 'bin', 'conf'):
             if (newfile := Path(filename)).exists():
                 if newfile.is_dir():
                     shutil.rmtree(newfile, True)
@@ -95,8 +95,8 @@ class Updater:
     def replace_executable(self):
         print('▶ Downloading updates...')
 
-        filename = f'driver-box.{self.binary_type}-wv2.zip' if self.webview else f'driver-box.{self.binary_type}.zip'
-        url = f'https://github.com/markmybytes/driver-box/releases/download/v{self.version_to}/{filename}'
+        filename = f'install-it.{self.binary_type}-wv2.zip' if self.webview else f'install-it.{self.binary_type}.zip'
+        url = f'https://github.com/install-it/install-it/releases/download/v{self.version_to}/{filename}'
         resp = requests.get(url, stream=True)
 
         if resp.headers.get('content-type') not in ('application/zip', 'application/octet-stream'):
@@ -119,8 +119,8 @@ class Updater:
                     z.extract(archive.filename, str(tmpdir))
 
             print('  ↳ Updating files...')
-            paths = (('driver-box.exe', 'bin')
-                     if self.webview else ('driver-box.exe',))
+            paths = (('install-it.exe', 'bin')
+                     if self.webview else ('install-it.exe',))
             for path in map(Path, paths):
                 if path.exists():
                     if path.is_dir():
@@ -158,9 +158,9 @@ class Updater:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Driver-Box Updater')
+    parser = argparse.ArgumentParser(description='install-it Updater')
     parser.add_argument('-d', '--app-directory', type=str,
-                        help='Root directory of driver-box')
+                        help='Root directory of install-it')
     parser.add_argument('-s', '--version-from', type=str,
                         required=True, help='Update from which version')
     parser.add_argument('-t', '--version-to', type=str,
@@ -172,12 +172,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     print(r'''
-     _      _                     _                                 _       _            
-  __| |_ __(_)_   _____ _ __     | |__   _____  __  _   _ _ __   __| | __ _| |_ ___ _ __ 
- / _` | '__| \ \ / / _ \ '__|____| '_ \ / _ \ \/ / | | | | '_ \ / _` |/ _` | __/ _ \ '__|
-| (_| | |  | |\ V /  __/ | |_____| |_) | (_) >  <  | |_| | |_) | (_| | (_| | ||  __/ |   
- \__,_|_|  |_| \_/ \___|_|       |_.__/ \___/_/\_\  \__,_| .__/ \__,_|\__,_|\__\___|_|   
-                                                         |_|                             
+ _           _        _ _       _ _                        _       _            
+(_)_ __  ___| |_ __ _| | |     (_) |_      _   _ _ __   __| | __ _| |_ ___ _ __ 
+| | '_ \/ __| __/ _` | | |_____| | __|____| | | | '_ \ / _` |/ _` | __/ _ \ '__|
+| | | | \__ \ || (_| | | |_____| | ||_____| |_| | |_) | (_| | (_| | ||  __/ |   
+|_|_| |_|___/\__\__,_|_|_|     |_|\__|     \__,_| .__/ \__,_|\__,_|\__\___|_|   
+                                                |_|                             
 ''')
 
     if args.app_directory:
@@ -189,7 +189,7 @@ if __name__ == '__main__':
 
         print('✔ Update successful.')
         if input('Open the app? [Y]/N: ').lower() in ('y', ''):
-            subprocess.Popen('driver-box.exe')
+            subprocess.Popen('install-it.exe')
     except Exception as e:
         print(f'✘ Update failed: {e}')
         input('Press any key to exit...')
