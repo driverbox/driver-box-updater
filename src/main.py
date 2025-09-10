@@ -132,14 +132,14 @@ class Updater:
                     shutil.move(tmpdir.joinpath(path), Path(path))
 
     def migrate_config(self):
+        print('▶ Migrating configuration...')
+        shutil.copytree(self.dir_backup.joinpath('conf'), Path('conf'))
+        
         if self.version_from.major == self.version_to.major:
             return
         if self.version_from.major == 1 and (self.version_to.major == 2 or self.version_to.major >= 5):
             raise NotImplementedError(
                 f'Auto update from v{self.version_from.major} to v{self.version_to.major} is not supported yet.')
-
-        print('▶ Migrating configuration...')
-        shutil.copytree(self.dir_backup / 'conf', Path('conf'))
 
     def update(self) -> None:
         self.print_summary()
